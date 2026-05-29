@@ -1,3 +1,145 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
+## 저장소 구조
+
+이 저장소는 세 개의 git 서브모듈로 이루어진 모노레포다.
+
+```
+com.ragwatson/
+├── backend/    # FastAPI Python 백엔드 (서브모듈: com.ragwatson.api)
+├── frontend/   # Next.js TypeScript 프론트엔드 (서브모듈: com.ragwatson.www)
+└── docs/       # Obsidian 문서 (서브모듈: com.ragwatson.docs)
+```
+
+서브모듈을 처음 받을 때: `git submodule update --init --recursive`
+
+---
+
+## Backend
+
+### 실행
+
+```bash
+cd backend
+# PYTHONPATH에 backend/와 backend/apps/ 모두 포함 필요
+$env:PYTHONPATH = ".;apps"   # PowerShell
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+### 환경 변수
+
+`backend/.env`를 `.env.example` 기반으로 생성한다.
+
+```
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/dbname
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-2.5-flash   # 선택
+```
+
+### 의존성
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+### DB 마이그레이션
+
+테이블은 앱 시작 시 `create_all_tables()`로 자동 생성된다. Alembic 마이그레이션이 필요할 때:
+
+```bash
+cd backend
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+```
+
+### 아키텍처
+
+**헥사고날(Ports & Adapters)** 아키텍처를 사용한다. 각 앱(`apps/<name>/`)은 다음 레이어로 구성된다.
+
+```
+apps/<앱명>/
+├── domain/             # 엔티티·값 객체 (순수 비즈니스 로직)
+├── app/
+│   ├── ports/input/    # 유스케이스 인터페이스 (입력 포트)
+│   ├── ports/output/   # 레포지터리 인터페이스 (출력 포트)
+│   └── use_cases/      # 유스케이스 구현체
+└── adapter/
+    ├── inbound/api/    # FastAPI 라우터 및 Pydantic 스키마
+    └── outbound/       # DB 구현체 (ORM 모델, pg 레포지터리)
+```
+
+**Python import 경로**: `backend/apps/`가 PYTHONPATH에 있으므로 `from titanic.xxx import ...` 형태로 임포트한다 (`from apps.titanic.xxx`가 아님).
+
+### 앱 목록 및 역할
+
+| 앱 | 역할 |
+|----|------|
+| `titanic` | 타이타닉 승객 CSV 업로드·조회 (ML 교육용 데이터셋) |
+| `friday13th` | 사용자·관리자 관리 |
+| `matrix` | Gemini API 키·외부 클라이언트 싱글톤 관리 (`Keymaker`) |
+| `inception` | DB 헬스체크 |
+| `imitation_game` | 문서 읽기·분석 |
+| `social_network` | 소셜 기능 (스켈레톤) |
+
+### 네이밍 컨벤션
+
+파일명·클래스명·라우터 prefix에 영화 캐릭터 이름을 bounded context 식별자로 사용한다. 예: `james_router`, `rose_router`, `walter_repository`, `jason_command_router`. 새 컴포넌트를 추가할 때도 해당 앱의 기존 캐릭터 체계를 따른다.
+
+---
+
+## Frontend
+
+### 실행
+
+```bash
+cd frontend
+pnpm dev        # 개발 서버 (localhost:3000)
+pnpm build      # 프로덕션 빌드
+pnpm lint       # ESLint
+```
+
+패키지 매니저는 **pnpm**을 사용한다.
+
+### 환경 변수
+
+`frontend/.env.local`:
+
+```
+GEMINI_API_KEY=...
+```
+
+### 기술 스택
+
+- **Next.js 16** (App Router) + **React 19** + **TypeScript 5.7**
+- **Tailwind CSS v4** (`@tailwindcss/postcss`)
+- **shadcn/ui** — `components/ui/`에 Radix UI 기반 컴포넌트. 새 UI 컴포넌트는 `pnpm dlx shadcn@latest add <component>`로 추가한다.
+- **Gemini AI** — `app/api/gemini/chat/route.ts`가 Google REST API 직접 호출 (SDK 미사용)
+
+### 페이지 구조
+
+| 경로 | 역할 |
+|------|------|
+| `/` | 홈 (Hero, Portfolio, Education, Contact) |
+| `/lesson` | 교육 레슨 목록 |
+| `/lesson/titanic` | 타이타닉 ML 수업 개요 |
+| `/lesson/titanic/data-collection` | CSV 업로드·데이터 수집 실습 |
+| `/titanic` | 타이타닉 데이터 뷰어 |
+| `/login` | 로그인 |
+| `/notice` | 공지사항 |
+
+### 컴포넌트 컨벤션
+
+- 페이지별 컴포넌트는 `components/<페이지명>/` 하위에 둔다
+- `components/ui/`는 shadcn/ui 자동 생성 파일이므로 직접 수정하지 않는다
+- `next.config.mjs`의 `typescript.ignoreBuildErrors: true`는 의도된 설정이다 (빌드 시 타입 에러 무시)
+
+---
+
 # LLM 코딩 행동 지침
 
 일반적인 LLM 코딩 실수를 줄이기 위한 행동 지침이다. [Andrej Karpathy의 관찰](https://x.com/karpathy/status/2015883857489522876)을 바탕으로 정리되었다. 프로젝트별 지침이 있으면 본 문서와 병합하여 사용한다.
